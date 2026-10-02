@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "MyStudyAI",
+    "slug": "mystudyai-frontend",
+    "scheme": "mystudyai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mystudyai.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Scan questions and take photos for your study materials.",
+        "NSMicrophoneUsageDescription": "Record lectures and use voice input.",
+        "NSSpeechRecognitionUsageDescription": "Turn your speech into text."
+      }
+    },
+    "android": {
+      "package": "com.mystudyai.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0b1220",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-audio",
+      "expo-sharing",
+      "expo-speech-recognition",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose pictures for your notes, posts and profile."
+        }
+      ],
+      "expo-notifications",
+      "expo-web-browser",
+      "expo-asset"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "37de40f5-9b1e-4cb8-ba84-d246ae994515"
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 {
   "name": "mystudyai-backend",
   "version": "1.0.0",
-  "description": "MyStudyAI API - Express business logic on Supabase (Postgres, Auth, Storage) + Claude AI",
+  "description": "MyStudyAI API - Express business logic on Supabase (Postgres, Auth, Storage) + OpenAI",
   "main": "server.js",
   "private": true,
   "scripts": {
@@ -13,7 +13,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.128.0",
+    "openai": "^5.0.0",
     "@supabase/supabase-js": "^2.117.2",
     "cors": "^2.8.6",
     "dotenv": "^18.0.3",

@@ -3,8 +3,7 @@
  *
  *  - admin():        service-role client. Bypasses Row Level Security - use ONLY for privileged work
  *                    (verifying tokens, quiz answer keys, AI results, storage). Always filter by the user id.
- *  - forUser(token): anon-key client that sends the student's access token, so every query runs
- *                    under Row Level Security as that student. This is the default for data access.
+ *  - forUser():      same service-role client (no anon key is used). Services scope every query by user id.
  *  - check():        unwraps { data, error } and turns errors into friendly AppErrors.
  */
 const { createClient } = require('@supabase/supabase-js');
@@ -31,12 +30,15 @@ function admin() {
   return adminClient;
 }
 
-function forUser(accessToken) {
+/** The backend uses only the service-role key. Every query MUST filter by the signed-in user's id. */
+function forUser() {
+  return admin();
+}
+
+/** A fresh, throw-away service-key client (used where a client must not be shared, e.g. password checks). */
+function isolated() {
   assertConfigured();
-  return createClient(config.supabase.url, config.supabase.anonKey, {
-    ...NO_SESSION,
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
-  });
+  return createClient(config.supabase.url, config.supabase.serviceRoleKey, NO_SESSION);
 }
 
 /** Unwrap a Supabase response. `what` names the operation for logs and messages. */
@@ -68,4 +70,4 @@ async function ping() {
   }
 }
 
-module.exports = { admin, forUser, check, ping };
+module.exports = { admin, forUser, isolated, check, ping };

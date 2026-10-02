@@ -14,7 +14,7 @@ const server = app.listen(config.port, async () => {
   console.log(`\nMyStudyAI API running at http://localhost:${config.port}/api  (health: /api/health)`);
 
   if (!config.supabase.configured) {
-    console.warn(`[supabase] Missing in Backend/.env: ${config.supabase.missing.join(', ')}. The API answers 503 until they are set.`);
+    console.warn(`[supabase] Missing in backend/.env: ${config.supabase.missing.join(', ')}. The API answers 503 until they are set.`);
   } else {
     const db = await ping();
     if (db.ok) {
@@ -26,7 +26,7 @@ const server = app.listen(config.port, async () => {
       console.warn('[supabase] Could not reach Supabase. Check SUPABASE_URL / keys and your internet connection.');
     }
   }
-  if (!aiService.isConfigured()) console.warn('[ai] No AI_API_KEY in Backend/.env - AI features are disabled until you add one.');
+  if (!aiService.isConfigured()) console.warn('[ai] No AI_API_KEY in backend/.env - AI features are disabled until you add one.');
   if (!extractService.hasFfmpeg()) console.warn('[ai] ffmpeg not found - video frames cannot be extracted (videos use their description).');
   console.log('');
 });

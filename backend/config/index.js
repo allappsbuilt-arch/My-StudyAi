@@ -22,16 +22,13 @@ const config = {
   // Supabase: Project Settings -> API
   supabase: {
     url: clean(process.env.SUPABASE_URL),
-    // Public key: used to build per-user clients so Row Level Security applies to every query
-    anonKey: clean(process.env.SUPABASE_ANON_KEY),
-    // Secret key: bypasses RLS. Server only - used for privileged work (quiz answer keys, AI results, storage)
+    // Secret key: bypasses RLS. Server only - the backend's only Supabase key
     serviceRoleKey: clean(process.env.SUPABASE_SERVICE_ROLE_KEY),
   },
 
   ai: {
     apiKey: process.env.AI_API_KEY || '',
-    model: process.env.AI_MODEL || 'claude-opus-5',
-    useFallbacks: (process.env.AI_USE_FALLBACKS || 'true').toLowerCase() === 'true',
+    model: process.env.AI_MODEL || 'gpt-4o',
     maxInputChars: toInt(process.env.AI_MAX_INPUT_CHARS, 400000),
   },
 
@@ -41,9 +38,9 @@ const config = {
 };
 
 config.isProduction = config.env === 'production';
-config.supabase.configured = Boolean(config.supabase.url && config.supabase.anonKey && config.supabase.serviceRoleKey);
-config.supabase.missing = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY'].filter(
-  (k) => !config.supabase[{ SUPABASE_URL: 'url', SUPABASE_ANON_KEY: 'anonKey', SUPABASE_SERVICE_ROLE_KEY: 'serviceRoleKey' }[k]]
+config.supabase.configured = Boolean(config.supabase.url && config.supabase.serviceRoleKey);
+config.supabase.missing = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'].filter(
+  (k) => !config.supabase[{ SUPABASE_URL: 'url', SUPABASE_SERVICE_ROLE_KEY: 'serviceRoleKey' }[k]]
 );
 
 config.isAllowedOrigin = (origin) => {

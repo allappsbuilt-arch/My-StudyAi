@@ -7,7 +7,7 @@ Upload study material and get AI study guides, chat with an AI tutor, make quizz
 | **Frontend** (`frontend/`) | React 19 + Vite, :3000 | UI only. Uses Supabase **Auth** for sign-in/sessions; every data request goes to the backend |
 | **Backend** (`backend/`) | Node.js + Express 5, :5000 | Business logic and secure server-side work: validation, streaks, spaced repetition, quiz grading, feeds, rankings, file handling, AI |
 | **Supabase** (`backend/supabase/`) | Postgres, Auth, Storage | Database (with Row Level Security), authentication, file storage; migrations live in `backend/supabase/migrations` |
-| **AI** | Anthropic Claude (`claude-opus-5`) | Called only from the backend |
+| **AI** | OpenAI (`gpt-4o`) | Called only from the backend |
 
 ---
 
@@ -23,8 +23,7 @@ Upload study material and get AI study guides, chat with an AI tutor, make quizz
    middleware/auth.js   verifies the token with Supabase → req.user, req.db
    routes → controllers → services (business logic)
    lib/supabase.js
-     forUser(token)  anon key + student's token  → every query runs under Row Level Security
-     admin()         service-role key (server only) → quiz answer keys, AI results, Storage
+     admin() / forUser()  service-role key only (server only) → every query; services filter by user id
    │
    ▼
  Supabase: Postgres (RLS) · Storage (materials private; avatars/posts public) · Auth
@@ -32,8 +31,8 @@ Upload study material and get AI study guides, chat with an AI tutor, make quizz
 
 **Security rules**
 
-- The **service-role key exists only in `backend/.env`**. The frontend only has the public anon key.
-- The backend queries as the signed-in student (`forUser`), so Row Level Security still applies even to server code. The service role is used only where students must *not* have direct access (e.g. quiz answer keys, which have no RLS policy at all).
+- The **service-role key exists only in `backend/.env`**. The backend uses only this key (no anon key). The frontend only has the public anon key, for sign-in.
+- The backend queries with the service-role key, which **bypasses Row Level Security**, so every service query must be scoped by the signed-in user's id (`ctx.userId`). RLS still protects any direct access from the browser.
 - Files are uploaded to the backend, validated (type/size), then stored in Supabase Storage under `<user id>/...`. Private files are opened with short-lived signed URLs.
 - Rate limits per student (300 req/min overall, 30 AI req/min), Helmet security headers, CORS allow-list.
 
@@ -46,7 +45,6 @@ My studyai/
 ├── backend/
 │   ├── server.js                        starts the server (graceful shutdown)
 │   ├── app.js                           Express app: helmet, CORS, health, routes, errors
-│   ├── .env / .env.example              SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, AI_API_KEY
 │   ├── config/index.js                  env loading + validation
 │   ├── lib/supabase.js                  admin() + forUser(token) clients, error mapping
 │   ├── lib/context.js                   request context + student's local-time helpers
@@ -66,7 +64,6 @@ My studyai/
 │
 └── frontend/
     ├── .env                             VITE_SKIP_LOGIN, optional VITE_API_URL
-    ├── .env.local / .env.example        VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY (git-ignored)
     └── src/
         ├── lib/supabase.js              Supabase client - authentication only
         ├── services/api.js              HTTP client for the backend (all data)
@@ -97,15 +94,14 @@ In the Supabase dashboard also:
 `backend/.env`
 ```
 SUPABASE_URL=https://<project-ref>.supabase.co
-SUPABASE_ANON_KEY=<anon / publishable key>
 SUPABASE_SERVICE_ROLE_KEY=<service_role / secret key>
-AI_API_KEY=<Anthropic key>           # optional - only AI features need it
+AI_API_KEY=<OpenAI key>           # optional - only AI features need it
 ```
 
 `frontend/.env.local`
 ```
 VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=<anon / publishable key>
+VITE_SUPABASE_ANON_KEY=<anon / publishable key>   # frontend sign-in only
 ```
 
 ### 4. Run (two terminals)

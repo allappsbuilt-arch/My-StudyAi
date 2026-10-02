@@ -1,5 +1,5 @@
 /**
- * AI service - the ONLY file that talks to the AI provider (Anthropic Claude).
+ * AI service - the ONLY file that talks to the AI provider (OpenAI).
  *
  * The API key is read from backend/.env (AI_API_KEY) and never leaves the server.
  * Functions:
@@ -7,80 +7,77 @@
  *   - analyzeMaterial(input)                 -> summary, key points, definitions, topics, questions, recommendations
  *   - generateQuiz(options)                  -> multiple-choice questions with explanations
  */
-const Anthropic = require('@anthropic-ai/sdk');
+const OpenAI = require('openai');
 const config = require('../config');
 const { AppError } = require('../middleware/errorHandler');
 
 let client = null;
 
 /** Shown by AI Tutor, AI analysis and AI quiz generation when no key is configured. */
-const AI_NOT_CONFIGURED_MESSAGE = 'AI features require an AI API key. Please configure AI_API_KEY in backend/.env.';
+const AI_NOT_CONFIGURED_MESSAGE = 'AI features require an OpenAI API key. Please configure AI_API_KEY in backend/.env.';
 
 function getClient() {
   if (!config.ai.apiKey || config.ai.apiKey === 'your_api_key_here') {
     throw new AppError(AI_NOT_CONFIGURED_MESSAGE, 503, undefined, 'AI_NOT_CONFIGURED');
   }
-  if (!client) client = new Anthropic({ apiKey: config.ai.apiKey, maxRetries: 2 });
+  if (!client) client = new OpenAI({ apiKey: config.ai.apiKey, maxRetries: 2 });
   return client;
 }
 
 const model = () => config.ai.model;
-// Effort control is not available on Haiku models
-const supportsEffort = () => !/haiku/i.test(model());
-// Server-side refusal fallbacks are available for Claude Opus 5 and Fable models
-const supportsFallbacks = () => config.ai.useFallbacks && /^claude-(opus-5|fable-5)/.test(model());
 
-/** Turn SDK errors into friendly AppErrors the frontend can show. */
+/** Turn SDK errors into friendly AppErrors the app can show. */
 function translateError(err) {
   if (err instanceof AppError) return err;
-  if (err instanceof Anthropic.AuthenticationError) return new AppError('The AI API key is invalid. Check AI_API_KEY in backend/.env.', 503);
-  if (err instanceof Anthropic.PermissionDeniedError) return new AppError('The AI API key does not have permission for this model.', 503);
-  if (err instanceof Anthropic.NotFoundError) return new AppError(`The AI model "${model()}" was not found. Check AI_MODEL in backend/.env.`, 503);
-  if (err instanceof Anthropic.RateLimitError) return new AppError('The AI is receiving too many requests. Please wait a moment and try again.', 429);
-  if (err instanceof Anthropic.BadRequestError) return new AppError(`The AI could not process this request: ${err.message}`, 502);
-  if (err instanceof Anthropic.APIConnectionError) return new AppError('Could not reach the AI service. Check your internet connection.', 503);
-  if (err instanceof Anthropic.APIError) return new AppError('The AI service returned an error. Please try again.', 502);
+  if (err instanceof OpenAI.AuthenticationError) return new AppError('The OpenAI API key is invalid. Check AI_API_KEY in backend/.env.', 503);
+  if (err instanceof OpenAI.PermissionDeniedError) return new AppError('The OpenAI API key does not have permission for this model.', 503);
+  if (err instanceof OpenAI.NotFoundError) return new AppError(`The AI model "${model()}" was not found. Check AI_MODEL in backend/.env.`, 503);
+  if (err instanceof OpenAI.RateLimitError) return new AppError('The AI is receiving too many requests (or the OpenAI quota is used up). Please wait a moment and try again.', 429);
+  if (err instanceof OpenAI.BadRequestError) return new AppError(`The AI could not process this request: ${err.message}`, 502);
+  if (err instanceof OpenAI.APIConnectionError) return new AppError('Could not reach the AI service. Check your internet connection.', 503);
+  if (err instanceof OpenAI.APIError) return new AppError('The AI service returned an error. Please try again.', 502);
   return err;
 }
 
-/**
- * One call to Claude. Uses streaming under the hood (safe for long outputs)
- * and returns the final text.
- */
-async function callClaude({ system, messages, maxTokens = 16000, effort = 'high', schema }) {
-  const anthropic = getClient();
+/** Convert our content blocks (text / image / pdf document) to OpenAI content parts. */
+function toOpenAIContent(content) {
+  if (typeof content === 'string') return content;
+  return content.map((b) => {
+    if (b.type === 'image') return { type: 'image_url', image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } };
+    if (b.type === 'document') return { type: 'file', file: { filename: 'material.pdf', file_data: `data:${b.source.media_type};base64,${b.source.data}` } };
+    return { type: 'text', text: b.text };
+  });
+}
 
-  const params = { model: model(), max_tokens: maxTokens, system, messages };
-  const outputConfig = {};
-  if (supportsEffort()) outputConfig.effort = effort;
-  if (schema) outputConfig.format = { type: 'json_schema', schema };
-  if (Object.keys(outputConfig).length) params.output_config = outputConfig;
+/**
+ * One call to OpenAI (Chat Completions). Returns the text, or parsed JSON when a schema is given.
+ * `effort` is kept by callers for readability but not sent (only reasoning models support it).
+ */
+async function callAI({ system, messages, maxTokens = 16000, schema }) {
+  const openai = getClient();
+
+  const params = {
+    model: model(),
+    max_completion_tokens: maxTokens,
+    messages: [{ role: 'system', content: system }, ...messages.map((m) => ({ role: m.role, content: toOpenAIContent(m.content) }))],
+  };
+  if (schema) params.response_format = { type: 'json_schema', json_schema: { name: 'result', strict: true, schema } };
 
   let response;
   try {
-    if (supportsFallbacks()) {
-      // If Claude declines for safety reasons, the API re-runs on a fallback model automatically.
-      response = await anthropic.beta.messages
-        .stream({ ...params, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' })
-        .finalMessage();
-    } else {
-      response = await anthropic.messages.stream(params).finalMessage();
-    }
+    response = await openai.chat.completions.create(params);
   } catch (err) {
     throw translateError(err);
   }
 
-  if (response.stop_reason === 'refusal') {
+  const choice = response.choices?.[0];
+  if (choice?.message?.refusal || choice?.finish_reason === 'content_filter') {
     throw new AppError("The AI couldn't help with this request. Try rephrasing it or using different material.", 422);
   }
 
-  const text = response.content
-    .filter((b) => b.type === 'text')
-    .map((b) => b.text)
-    .join('')
-    .trim();
+  const text = (choice?.message?.content || '').trim();
 
-  if (response.stop_reason === 'max_tokens' && schema) {
+  if (choice?.finish_reason === 'length' && schema) {
     throw new AppError('The AI response was too long to finish. Try a smaller file or fewer questions.', 502);
   }
   if (!text) throw new AppError('The AI returned an empty response. Please try again.', 502);
@@ -125,7 +122,7 @@ async function tutorReply(history, message, material) {
     system += `\n\nThe student is studying this material. Use it as the main reference.\n<material title="${(material.title || 'Study material').replace(/"/g, "'")}">\n<summary>${material.summary || ''}</summary>\n${text ? `<content>${text}</content>` : ''}\n</material>`;
   }
 
-  return callClaude({ system, messages, maxTokens: 8000, effort: 'medium' });
+  return callAI({ system, messages, maxTokens: 8000, effort: 'medium' });
 }
 
 // ---------------------------------------------------------------------------
@@ -202,7 +199,7 @@ async function analyzeMaterial(input) {
   prompt += `\nCreate the study guide for this material.`;
   content.push({ type: 'text', text: prompt });
 
-  const r = await callClaude({ system: ANALYSIS_SYSTEM, messages: [{ role: 'user', content }], maxTokens: 32000, effort: 'high', schema: ANALYSIS_SCHEMA });
+  const r = await callAI({ system: ANALYSIS_SYSTEM, messages: [{ role: 'user', content }], maxTokens: 32000, effort: 'high', schema: ANALYSIS_SCHEMA });
 
   return {
     title: String(r.title || input.filename).slice(0, 250),
@@ -261,7 +258,7 @@ async function generateQuiz({ subject, topic, difficulty, count, materialText })
   }
 
   const attempt = async () => {
-    const r = await callClaude({ system: QUIZ_SYSTEM, messages: [{ role: 'user', content: prompt }], maxTokens: 16000, effort: 'medium', schema: QUIZ_SCHEMA });
+    const r = await callAI({ system: QUIZ_SYSTEM, messages: [{ role: 'user', content: prompt }], maxTokens: 16000, effort: 'medium', schema: QUIZ_SCHEMA });
     return (r.questions || [])
       .filter((q) => q && q.question && Array.isArray(q.options) && q.options.length === 4 && ['A', 'B', 'C', 'D'].includes(q.correct_option))
       .map((q) => ({
@@ -299,7 +296,7 @@ async function solveProblem({ text, image }) {
   const content = [];
   if (image) content.push({ type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.data } });
   content.push({ type: 'text', text: text ? `Question:\n${text}` : 'Solve the question in this image.' });
-  return callClaude({ system: SOLVE_SYSTEM, messages: [{ role: 'user', content }], maxTokens: 8000, effort: 'medium' });
+  return callAI({ system: SOLVE_SYSTEM, messages: [{ role: 'user', content }], maxTokens: 8000, effort: 'medium' });
 }
 
 const TRANSLATE_SCHEMA = {
@@ -316,7 +313,7 @@ ${explain ? 'In "explanation", briefly explain (in English, 2-5 bullet points) k
 <text>
 ${text}
 </text>`;
-  const r = await callClaude({
+  const r = await callAI({
     system: 'You are a precise, natural-sounding translator for students.',
     messages: [{ role: 'user', content: prompt }],
     maxTokens: 6000,
@@ -328,7 +325,7 @@ ${text}
 
 async function summarize({ text, length }) {
   const size = { short: '3-5 bullet points', medium: 'a short paragraph followed by 5-8 key bullet points', long: 'a detailed multi-section summary with headings' }[length] || 'a short paragraph followed by key bullet points';
-  return callClaude({
+  return callAI({
     system: 'You summarise study material for students clearly and accurately. Use Markdown.',
     messages: [{ role: 'user', content: `Summarise this as ${size}. Finish with a "Key terms" list if there are any.\n<material>\n${text.slice(0, 150000)}\n</material>` }],
     maxTokens: 6000,
@@ -343,7 +340,7 @@ const ESSAY_PROMPTS = {
 };
 
 async function essayHelp({ mode, text }) {
-  return callClaude({
+  return callAI({
     system: 'You are a supportive writing coach for students. Help them learn to write better - do not just hand in finished work for graded assignments; explain your suggestions. Use Markdown.',
     messages: [{ role: 'user', content: ESSAY_PROMPTS[mode](text) }],
     maxTokens: 8000,
@@ -352,7 +349,7 @@ async function essayHelp({ mode, text }) {
 }
 
 async function lectureNotes({ transcript, title }) {
-  return callClaude({
+  return callAI({
     system: 'You turn raw lecture transcripts into clean, well-organised study notes. Use Markdown headings, bullet points, bold key terms, and finish with "Key takeaways" and "Questions to review".',
     messages: [{ role: 'user', content: `Lecture: ${title}\n<transcript>\n${transcript.slice(0, 150000)}\n</transcript>` }],
     maxTokens: 10000,
@@ -376,7 +373,7 @@ async function generateFlashcards({ topic, subject, count, materialText }) {
   let prompt = `Create exactly ${count} flashcards for studying.\nSubject: ${subject || 'General'}\nTopic: ${topic}\n`;
   if (materialText) prompt += `\nBase the cards on this material:\n<material>\n${materialText.slice(0, 150000)}\n</material>\n`;
   prompt += '\nFront: a term or short question. Back: a concise, accurate answer (1-3 sentences).';
-  const r = await callClaude({
+  const r = await callAI({
     system: 'You write excellent flashcards for spaced-repetition study. One fact per card, no duplicates.',
     messages: [{ role: 'user', content: prompt }],
     maxTokens: 12000,

@@ -42,6 +42,6 @@ Project Settings -> API:
 
 | Key | Goes in | Notes |
 |---|---|---|
-| Project URL | `frontend/.env.local` (`VITE_SUPABASE_URL`) and `backend/.env` (`SUPABASE_URL`) | |
-| anon / publishable key | `frontend/.env.local` (`VITE_SUPABASE_ANON_KEY`) and `backend/.env` (`SUPABASE_ANON_KEY`) | Safe for the browser - RLS protects the data |
-| service_role / secret key | `backend/.env` **only** (`SUPABASE_SERVICE_ROLE_KEY`) | Bypasses RLS. Never put it in the frontend |
+| Project URL | `mobile/.env` (`EXPO_PUBLIC_SUPABASE_URL`) and `backend/.env` (`SUPABASE_URL`) | |
+| anon / publishable key | `mobile/.env` (`EXPO_PUBLIC_SUPABASE_ANON_KEY`) | App sign-in only; the backend does not use it |
+| service_role / secret key | `backend/.env` **only** (`SUPABASE_SERVICE_ROLE_KEY`) | Bypasses RLS. Never put it in the mobile app |

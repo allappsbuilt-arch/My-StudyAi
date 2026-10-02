@@ -1,9 +1,8 @@
 /**
  * Profiles: the signed-in student's profile, preferences, avatar and password.
  */
-const { createClient } = require('@supabase/supabase-js');
 const config = require('../config');
-const { admin, check } = require('../lib/supabase');
+const { admin, isolated, check } = require('../lib/supabase');
 const { AppError } = require('../middleware/errorHandler');
 const storage = require('./storageService');
 
@@ -105,7 +104,7 @@ async function changePassword(ctx, currentPassword, newPassword) {
   if (typeof newPassword !== 'string' || newPassword.length < 8 || !/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) {
     throw new AppError('New password must be 8+ characters with letters and numbers.', 400);
   }
-  const verifier = createClient(config.supabase.url, config.supabase.anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  const verifier = isolated();
   const { error } = await verifier.auth.signInWithPassword({ email: ctx.user.email, password: String(currentPassword || '') });
   if (error) throw new AppError('Your current password is incorrect.', 400);
   const res = await admin().auth.admin.updateUserById(ctx.userId, { password: newPassword });
