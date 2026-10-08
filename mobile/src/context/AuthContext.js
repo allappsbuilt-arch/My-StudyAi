@@ -1,6 +1,6 @@
 /**
  * Authentication state for the whole app.
- * Sign-in/sessions: Supabase Auth (session kept in AsyncStorage). Profile data: the MyStudyAI backend.
+ * Sign-in/sessions: the MyStudyAI backend (/api/auth, session kept in AsyncStorage). Profile data: the same backend.
  *
  *  const { user, isAuthenticated, login, register, logout, refreshUser, updateUser, setUser } = useAuth();
  *
@@ -9,7 +9,7 @@
  * profile preferences, so they are the same on every device.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { supabase, supabaseConfigured } from '../lib/supabase';
+import { session } from '../lib/session';
 import { authApi, userApi, systemApi, setUnauthorizedHandler, PREVIEW } from '../services/api';
 import { useTheme } from './ThemeContext';
 import { useI18n } from './I18nContext';
@@ -17,7 +17,7 @@ import { useI18n } from './I18nContext';
 const AuthContext = createContext(null);
 
 // mobile/.env: EXPO_PUBLIC_SKIP_LOGIN=true opens the app straight on Home as a guest student
-// (Supabase: enable Authentication -> Sign In / Providers -> "Allow anonymous sign-ins").
+// (Supabase: enable Authentication -> Sign In / Providers -> "Allow anonymous sign-ins" - set on the server, not in the app).
 export const SKIP_LOGIN = String(process.env.EXPO_PUBLIC_SKIP_LOGIN || 'false').toLowerCase() === 'true';
 
 export function AuthProvider({ children }) {
@@ -25,7 +25,7 @@ export function AuthProvider({ children }) {
   const [initializing, setInitializing] = useState(true);
   const [aiConfigured, setAiConfigured] = useState(true); // false = AI server has no AI_API_KEY
   const [skipError, setSkipError] = useState(''); // skip-login mode could not sign in
-  // '' | frontend_env | backend_offline | not_configured | not_migrated | unreachable
+  // '' | backend_offline | not_configured | not_migrated | unreachable
   const [setupIssue, setSetupIssue] = useState('');
   const { setTheme } = useTheme();
   const { setLang } = useI18n();
@@ -64,11 +64,6 @@ export function AuthProvider({ children }) {
       userApi.me().then((u) => !cancelled && applyUser(u)).catch(() => {}).finally(finish);
       return () => { cancelled = true; };
     }
-    if (!supabaseConfigured) {
-      setSetupIssue('frontend_env');
-      finish();
-      return () => { cancelled = true; };
-    }
     (async () => {
       // Is the backend up and connected to Supabase?
       try {
@@ -83,7 +78,7 @@ export function AuthProvider({ children }) {
         return finish();
       }
 
-      const { data } = await supabase.auth.getSession();
+      const { data } = await session.auth.getSession();
       if (data.session && !cancelled) await loadUser();
       else if (SKIP_LOGIN && !cancelled) {
         // Skip-login mode: sign in as a guest student and go straight to Home
@@ -102,7 +97,7 @@ export function AuthProvider({ children }) {
       finish(); // the splash plays for at least ~1.2s
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: sub } = session.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT' || !session) setUser(null);
       else if (event === 'SIGNED_IN' || event === 'USER_UPDATED') setTimeout(loadUser, 0);
     });
@@ -114,7 +109,7 @@ export function AuthProvider({ children }) {
 
   // Expired session anywhere in the app -> back to login
   useEffect(() => {
-    setUnauthorizedHandler(() => (PREVIEW ? setUser(null) : supabase?.auth.signOut()));
+    setUnauthorizedHandler(() => (PREVIEW ? setUser(null) : session.auth.signOut()));
     return () => setUnauthorizedHandler(null);
   }, []);
 

@@ -1,18 +1,15 @@
 /**
  * The frontend's only way to reach data.
  *
- *  - Authentication: Supabase Auth in the browser (lib/supabase.js).
- *  - Everything else: the MyStudyAI backend (/api/...), called with the student's Supabase
- *    access token. The backend runs the business logic and talks to Supabase.
+ *  - Everything, including sign-in, goes through the MyStudyAI backend (/api/...). The app holds no
+ *    Supabase key; the session tokens come from /api/auth and are kept in lib/session.js. The backend runs the business logic and talks to Supabase.
  *
  * Screens import the grouped functions below and never call fetch or Supabase directly.
  */
 import { Platform } from 'react-native';
 import * as Linking from 'expo-linking';
-import { supabase, supabaseConfigured } from '../lib/supabase';
+import { session, API_BASE } from '../lib/session';
 
-// Phones cannot use a dev-server proxy: point this at the AI server (e.g. http://192.168.1.20:5000/api).
-const API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000/api';
 const authRedirect = (path) => Linking.createURL(path);
 
 /**
@@ -52,8 +49,7 @@ export function setUnauthorizedHandler(fn) {
 }
 
 async function accessToken() {
-  if (!supabase) return null;
-  const { data } = await supabase.auth.getSession();
+  const { data } = await session.auth.getSession();
   return data.session?.access_token || null;
 }
 
@@ -163,7 +159,7 @@ async function uploadWithProgress(path, form, onProgress, signal) {
 const FRIENDLY = [
   [/invalid login credentials/i, 'Incorrect email or password.'],
   [/user already registered/i, 'An account with this email already exists. Please log in instead.'],
-  [/email not confirmed/i, 'Please confirm your email first - check your inbox for the link from Supabase.'],
+  [/email not confirmed/i, 'Please confirm your email first - check your inbox for the confirmation link.'],
   [/password should be at least/i, 'Password must be at least 8 characters.'],
   [/anonymous sign-ins are disabled/i, 'Guest sign-in is turned off in Supabase (Authentication -> Sign In / Providers -> Allow anonymous sign-ins).'],
   [/provider is not enabled|unsupported provider/i, 'This sign-in option is not enabled in Supabase yet (Authentication -> Sign In / Providers).'],
@@ -207,47 +203,57 @@ export const systemApi = {
 };
 
 // ---------------------------------------------------------------------------
-// Auth (Supabase Auth in the browser)
+// Auth (through the backend)
 // ---------------------------------------------------------------------------
-function auth() {
-  if (!supabase) throw new ApiError('Supabase is not configured. Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to mobile/.env.', 0, 'NOT_CONFIGURED');
-  return supabase.auth;
+async function authCall(path, body, token) {
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/auth/${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(body || {}),
+    });
+  } catch {
+    throw new ApiError('Cannot reach the MyStudyAI server. Start it with "npm run dev" in the Backend folder.', 0, 'OFFLINE');
+  }
+  let json = null;
+  try { json = await res.json(); } catch { /* not JSON */ }
+  if (!res.ok) throw new ApiError(json?.message || 'Cannot reach the MyStudyAI server.', res.status, json?.code);
+  return json;
 }
-const authOk = ({ data, error }) => {
-  if (error) throw new ApiError(error.message, Number(error.status) || 400, error.code);
-  return data;
-};
+/** Call the backend, then keep the session it returns. */
+async function signInWith(path, body) {
+  const json = await authCall(path, body);
+  if (json.session) await session.auth.setSession(json.session);
+  return json;
+}
 
 export const authApi = {
   register: async ({ name, email, password }) =>
-    PREVIEW ? previewAuth('signIn') : authOk(await auth().signUp({ email, password, options: { data: { name }, emailRedirectTo: authRedirect('home') } })),
-  login: async ({ email, password }) => PREVIEW ? previewAuth('signIn') : authOk(await auth().signInWithPassword({ email, password })),
-  logout: async () => PREVIEW ? previewAuth('signOut') : authOk(await auth().signOut()),
-  guest: async () => PREVIEW ? previewAuth('signIn') : authOk(await auth().signInAnonymously()),
-  /** Google / Apple sign-in (enable the provider in Supabase -> Authentication -> Sign In / Providers). */
-  oauth: async (provider) => {
-    if (PREVIEW) throw new ApiError('Google / Apple sign-in needs Supabase. In UI preview use e-mail with any password.', 400);
-    const WebBrowser = await import('expo-web-browser');
-    const redirectTo = authRedirect('home');
-    const { data, error } = await auth().signInWithOAuth({ provider, options: { redirectTo, skipBrowserRedirect: true } });
-    if (error) throw new ApiError(error.message, Number(error.status) || 400, error.code);
-    const res = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
-    if (res.type === 'success') await authApi.sessionFromUrl(res.url);
-    return res;
+    PREVIEW ? previewAuth('signIn') : signInWith('register', { name, email, password, redirectTo: authRedirect('home') }),
+  login: async ({ email, password }) => PREVIEW ? previewAuth('signIn') : signInWith('login', { email, password }),
+  logout: async () => (PREVIEW ? previewAuth('signOut') : session.auth.signOut()),
+  guest: async () => PREVIEW ? previewAuth('signIn') : signInWith('guest'),
+  /** Google / Apple sign-in is not offered: sign-in goes through the backend with e-mail and password. */
+  oauth: async () => {
+    throw new ApiError('Google / Apple sign-in is not available. Please use your e-mail and password.', 400);
   },
   forgotPassword: async (email) => {
-    if (PREVIEW) return { message: 'UI preview: no e-mail is sent. Connect Supabase to use password reset.' };
-    authOk(await auth().resetPasswordForEmail(email, { redirectTo: authRedirect('reset-password') }));
-    return { message: 'If an account exists for this email, a password reset link has been sent. Open it on this device.' };
+    if (PREVIEW) return { message: 'UI preview: no e-mail is sent.' };
+    const json = await authCall('forgot', { email, redirectTo: authRedirect('reset-password') });
+    return { message: json.message };
   },
-  resetPassword: async ({ password }) => authOk(await auth().updateUser({ password })),
-  /** Sets the session from a Supabase recovery / confirmation link opened in the app. */
+  resetPassword: async ({ password }) => {
+    const { data } = await session.auth.getSession();
+    return authCall('reset', { password }, data.session?.access_token);
+  },
+  /** Stores the session from a password-reset / confirmation link opened in the app. */
   sessionFromUrl: async (url) => {
     const params = new URLSearchParams((url.split('#')[1] || url.split('?')[1] || ''));
     const access_token = params.get('access_token');
     const refresh_token = params.get('refresh_token');
     if (!access_token || !refresh_token) return null;
-    return authOk(await auth().setSession({ access_token, refresh_token }));
+    return session.auth.setSession({ access_token, refresh_token, expires_at: Number(params.get('expires_at')) || undefined });
   },
 };
 
@@ -423,4 +429,3 @@ export const toolsApi = {
   flashcards: (body) => post('/flashcards/generate', body, { timeout: AI_TIMEOUT }),
 };
 
-export { supabaseConfigured };

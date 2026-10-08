@@ -10,7 +10,7 @@ import { useToast } from '../context/ToastContext';
 import { useI18n } from '../context/I18nContext';
 import { useTheme } from '../context/ThemeContext';
 import { authApi, getErrorMessage, PREVIEW } from '../services/api';
-import { supabase } from '../lib/supabase';
+import { session } from '../lib/session';
 import { Alert, Button, Card, IconButton, IconTile, PasswordInput, ProgressBar, Row, Spinner, TextInput, Txt } from '../components/Ui';
 import { Brand, LogoMark } from '../components/Brand';
 import { LanguageMenu } from '../components/Misc';
@@ -316,12 +316,11 @@ export function ResetPasswordScreen() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!supabase) { setReady(false); return undefined; }
     let done = false;
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: sub } = session.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY' || session) { done = true; setReady(true); }
     });
-    supabase.auth.getSession().then(({ data }) => {
+    session.auth.getSession().then(({ data }) => {
       if (data.session) setReady(true);
       else setTimeout(() => !done && setReady(false), 2500);
     });
@@ -338,7 +337,7 @@ export function ResetPasswordScreen() {
     setServerError('');
     try {
       await authApi.resetPassword({ password: form.password });
-      await supabase.auth.signOut();
+      await session.auth.signOut();
       toast.success('Password updated. Please log in.');
     } catch (err) {
       setServerError(getErrorMessage(err));
@@ -386,7 +385,6 @@ export function SkipLoginErrorScreen({ reason }) {
 }
 
 const ISSUES = {
-  frontend_env: { title: 'Connect Supabase', text: 'The app needs your Supabase project URL and anon key.', steps: ['Supabase → Project Settings → API', 'Create mobile/.env with:', 'EXPO_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co\nEXPO_PUBLIC_SUPABASE_ANON_KEY=<anon key>', 'Restart "npx expo start" (add -c to clear the cache).'] },
   backend_offline: { title: 'Start the MyStudyAI server', text: "The app can't reach its backend. A phone cannot use localhost: set EXPO_PUBLIC_API_URL to your computer's address.", steps: ['Open a terminal in the backend folder', 'npm run dev', 'In mobile/.env: EXPO_PUBLIC_API_URL=http://<your-LAN-IP>:5000/api', 'Restart Expo, then reload.'] },
   not_configured: { title: 'Connect the server to Supabase', text: 'The backend is running but has no Supabase keys.', steps: ['Supabase → Project Settings → API', 'In backend/.env set:', 'SUPABASE_URL=https://<project-ref>.supabase.co\nSUPABASE_ANON_KEY=<anon key>\nSUPABASE_SERVICE_ROLE_KEY=<service_role key>', 'The server restarts automatically; then reload.'] },
   not_migrated: { title: 'Create the database tables', text: "Supabase is connected, but the MyStudyAI tables don't exist yet.", steps: ['Supabase → SQL Editor', 'Run the files in backend/supabase/migrations in order, then backend/supabase/seed.sql', 'Then reload.'] },
@@ -407,7 +405,6 @@ export function SetupRequiredScreen({ issue }) {
             : <Txt key={s} size="sm">• {s}</Txt>
         ))}
         <Button block icon={RefreshCw} onPress={reloadApp}>I've done this - reload</Button>
-        <Txt size="xs" color="muted" center>Full guide: README.md and backend/supabase/README.md</Txt>
       </Card>
     </AuthShell>
   );

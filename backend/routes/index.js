@@ -6,6 +6,7 @@ const { protect } = require('../middleware/auth');
 const { apiLimiter } = require('../middleware/rateLimits');
 
 const router = express.Router();
+router.use('/auth', require('./authRoutes'));
 router.use(protect, apiLimiter);
 
 router.use('/', require('./profileRoutes'));
